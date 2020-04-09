@@ -1,0 +1,17 @@
+COMP 321 Project 5: Malloc
+<Insert your name(s) and NetID(s).>
+
+---(Do not write lines of text that exceed the width of this line.)------------
+
+DESIGN DESCRIPTION
+
+<Insert an English description of your submission's design.  Do not submit
+pseudo-code.  Describe any design decisions that you made, such as the data
+structures and algorithms that you used.> 
+
+TESTING STRATEGY
+
+<Insert a detailed description of your testing strategy: At a minimum,
+you should explain how you tested your code, how you selected your inputs,
+what those inputs were, and why you believe those inputs were sufficient
+to test your code.>
