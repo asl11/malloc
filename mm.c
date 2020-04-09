@@ -27,15 +27,15 @@
  ********************************************************/
 team_t team = {
 	/* Team name */
-	"",
+	"LiLee",
 	/* First member's full name */
-	"",
+	"Alexander Li",
 	/* First member's NetID */
-	"",
+	"asl11",
 	/* Second member's full name (leave blank if none) */
-	"",
+	"Christopher Lee",
 	/* Second member's NetID (leave blank if none) */
-	""
+	"chl4"
 };
 
 /* Basic constants and macros: */
