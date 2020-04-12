@@ -27,7 +27,7 @@
  ********************************************************/
 team_t team = {
 	/* Team name */
-	"LiLee",
+	"Team LiLee",
 	/* First member's full name */
 	"Alexander Li",
 	/* First member's NetID */
@@ -66,6 +66,16 @@ team_t team = {
 
 /* Global variables: */
 static char *heap_listp; /* Pointer to first block */  
+static void block_list *free_list_segregatedp; /* Pointer to first block_list of the free_list.*/  
+
+/* Struct for segregated free list */
+struct block_list
+{
+	struct block_list *prev_list;
+	size_t size;
+	void *pointer;
+	struct block_list *next_list;
+}
 
 /* Function prototypes for internal helper routines: */
 static void *coalesce(void *bp);
@@ -78,6 +88,9 @@ static void checkblock(void *bp);
 static void checkheap(bool verbose);
 static void printblock(void *bp); 
 
+/* Helper functions that we created. */
+static int freelistindex(void *bp) ;
+
 /* 
  * Requires:
  *   None.
@@ -89,19 +102,21 @@ static void printblock(void *bp);
 int
 mm_init(void) 
 {
-
-	/* Create the initial empty heap. */
-	if ((heap_listp = mem_sbrk(4 * WSIZE)) == (void *)-1)
+	if ((free_list_segregatedp = mem_sbrk(4 * WSIZE + ((char *) free_list) + 16 * WSIZE)) == (void *)-1)
 		return (-1);
+
+	int i;
+	for (i = 0; i < 16; i ++) {
+		free_list_segregatedp[i] = NULL;
+	}
+
+	heap_listp = ((char *) free_list_segregatedp) + 16 * WSIZE;
+
 	PUT(heap_listp, 0);                            /* Alignment padding */
 	PUT(heap_listp + (1 * WSIZE), PACK(DSIZE, 1)); /* Prologue header */ 
 	PUT(heap_listp + (2 * WSIZE), PACK(DSIZE, 1)); /* Prologue footer */ 
 	PUT(heap_listp + (3 * WSIZE), PACK(0, 1));     /* Epilogue header */
-	heap_listp += (2 * WSIZE);
-
-	/* Extend the empty heap with a free block of CHUNKSIZE bytes. */
-	if (extend_heap(CHUNKSIZE / WSIZE) == NULL)
-		return (-1);
+	
 	return (0);
 }
 
@@ -344,11 +359,20 @@ place(void *bp, size_t asize)
 static void
 checkblock(void *bp) 
 {
-
 	if ((uintptr_t)bp % DSIZE)
 		printf("Error: %p is not doubleword aligned\n", bp);
 	if (GET(HDRP(bp)) != GET(FTRP(bp)))
 		printf("Error: header does not match footer\n");
+
+	int index = freelistindex(bp);
+	struct block_list *i = free_list_segregatedp[index];
+	while (i != NULL) {
+		if (i->pointer == bp) {
+			printf("Found %p", bp);
+		}
+		i = i->next_list;
+	}
+	printf("Error: %p not in free list", bp);
 }
 
 /* 
@@ -410,4 +434,52 @@ printblock(void *bp)
 	printf("%p: header: [%zu:%c] footer: [%zu:%c]\n", bp, 
 	    hsize, (halloc ? 'a' : 'f'), 
 	    fsize, (falloc ? 'a' : 'f'));
+}
+
+/*
+ * Requires:
+ *   "bp" is the address of a block.
+ *
+ * Effects:
+ *   Prints the correct index for the proper free list for a block of the size of "bp".
+ */
+static int
+freelistindex(void *bp) {
+	int block_size = GET_SIZE(bp);
+	int index = -1;
+	if (block_size < 2) {
+		index = 0;
+	} else if (block_size < pow(2, 2) && block_size >= 2) {
+		index = 1;
+	} else if (block_size < pow(2, 3) && block_size >= pow(2, 2)) {
+		index = 2;
+	} else if (block_size < pow(2, 4) && block_size >= pow(2, 3)) {
+		index = 3;
+	} else if (block_size < pow(2, 5) && block_size >= pow(2, 4)) {
+		index = 4;
+	} else if (block_size < pow(2, 6) && block_size >= pow(2, 5)) {
+		index = 5;
+	} else if (block_size < pow(2, 7) && block_size >= pow(2, 6)) {
+		index = 6;
+	} else if (block_size < pow(2, 8) && block_size >= pow(2, 7)) {
+		index = 7;
+	} else if (block_size < pow(2, 9) && block_size >= pow(2, 8)) {
+		index = 8;
+	} else if (block_size < pow(2, 10) && block_size >= pow(2, 9)) {
+		index = 9;
+	} else if (block_size < pow(2, 11) && block_size >= pow(2, 10)) {
+		index = 10;
+	} else if (block_size < pow(2, 12) && block_size >= pow(2, 11)) {
+		index = 11;
+	} else if (block_size < pow(2, 13) && block_size >= pow(2, 12)) {
+		index = 12;
+	} else if (block_size < pow(2, 14) && block_size >= pow(2, 13)) {
+		index = 13;
+	} else if (block_size < pow(2, 15) && block_size >= pow(2, 14)) {
+		index = 14;
+	} else {
+		index = 15;
+	}
+
+	return index;
 }
