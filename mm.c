@@ -13,6 +13,7 @@
  * as a pointer, i.e., sizeof(uintptr_t) == sizeof(void *).
  */
 
+#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -66,16 +67,7 @@ team_t team = {
 
 /* Global variables: */
 static char *heap_listp; /* Pointer to first block */  
-static void block_list *free_list_segregatedp; /* Pointer to first block_list of the free_list.*/  
-
-/* Struct for segregated free list */
-struct block_list
-{
-	struct block_list *prev_list;
-	size_t size;
-	void *pointer;
-	struct block_list *next_list;
-}
+static struct block_list **free_list_segregatedp; /* Pointer to first block_list of the free_list.*/  
 
 /* Function prototypes for internal helper routines: */
 static void *coalesce(void *bp);
@@ -89,8 +81,17 @@ static void checkheap(bool verbose);
 static void printblock(void *bp); 
 
 /* Helper functions that we created. */
-static int freelistindex(void *bp);
-static void remove_free(void* blockp);
+static int freelistindex(int size);
+static struct block_list *remove_free(void* blockp);
+
+/* Struct for segregated free list */
+struct block_list
+{
+	struct block_list *prev_list;
+	size_t size;
+	void *pointer;
+	struct block_list *next_list;
+};
 
 /* 
  * Requires:
@@ -103,7 +104,7 @@ static void remove_free(void* blockp);
 int
 mm_init(void) 
 {
-	if ((free_list_segregatedp = mem_sbrk(4 * WSIZE + ((char *) free_list) + 16 * WSIZE)) == (void *)-1)
+	if ((free_list_segregatedp = mem_sbrk(4 * WSIZE + 16 * sizeof(void*))) == (void*)-1)
 		return (-1);
 
 	int i;
@@ -111,7 +112,7 @@ mm_init(void)
 		free_list_segregatedp[i] = NULL;
 	}
 
-	heap_listp = ((char *) free_list_segregatedp) + 16 * WSIZE;
+	heap_listp = ((char *) free_list_segregatedp) + 16 * sizeof(void*);
 
 	PUT(heap_listp, 0);                            /* Alignment padding */
 	PUT(heap_listp + (1 * WSIZE), PACK(DSIZE, 1)); /* Prologue header */ 
@@ -134,7 +135,6 @@ void *
 mm_malloc(size_t size) 
 {
 	size_t asize;      /* Adjusted block size */
-	size_t extendsize; /* Amount to extend heap if no fit */
 	void *bp;
 
 	/* Ignore spurious requests. */
@@ -248,41 +248,47 @@ coalesce(void *bp)
 	size_t size = GET_SIZE(HDRP(bp));
 	bool prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
 	bool next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
+	struct block_list *add_block;
+	void *temp_bp;
 
 	if (prev_alloc && next_alloc) {                 /* Case 1 */
-		return (bp);
+		temp_bp = bp;
+		add_block = (struct block_list*) bp;
 	} else if (prev_alloc && !next_alloc) {         /* Case 2 */
 		remove_free(NEXT_BLKP(bp));
-		remove_free(bp);
+		temp_bp = bp;
+		add_block = (struct block_list*) bp;
 		size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
 		PUT(HDRP(bp), PACK(size, 0));
 		PUT(FTRP(bp), PACK(size, 0));
 	} else if (!prev_alloc && next_alloc) {         /* Case 3 */
-		remove_free(PREV_BLKP(bp));
-		remove_free(bp);
+		add_block = remove_free(PREV_BLKP(bp));
 		size += GET_SIZE(HDRP(PREV_BLKP(bp)));
 		PUT(FTRP(bp), PACK(size, 0));
 		PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
 		bp = PREV_BLKP(bp);
+		temp_bp = bp;
 	} else {                                        /* Case 4 */
-		remove_free(PREV_BLKP(bp));
 		remove_free(NEXT_BLKP(bp));
-		remove_free(bp);
+		add_block = remove_free(PREV_BLKP(bp));
 		size += GET_SIZE(HDRP(PREV_BLKP(bp))) + 
 		    GET_SIZE(FTRP(NEXT_BLKP(bp)));
 		PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
 		PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
 		bp = PREV_BLKP(bp);
+		temp_bp = bp;
 	}
 
 	int index = freelistindex(size / WSIZE);
-	struct block_list *add_block;
+	
 	add_block->prev_list = NULL;
-	add_block->pointer = bp;
+	add_block->pointer = temp_bp;
 	add_block->next_list = free_list_segregatedp[index];
-	free_list_segregatedp[index]->prev_list = add_block;
+	if (free_list_segregatedp[index] != NULL) {
+		free_list_segregatedp[index]->prev_list = add_block;
+	}
 	free_list_segregatedp[index] = add_block;
-	return (bp);
+	return (temp_bp);
 }
 
 /* 
@@ -323,12 +329,10 @@ extend_heap(size_t words)
 static void *
 find_fit(size_t asize)
 {
-	void *bp;
-
 	if (asize % WSIZE != 0)
 		printf("Error: you did something wrong");
 
-	int *index = freelistindex(asize / WSIZE);
+	int index = freelistindex(asize / WSIZE);
 
 	/* No fit was found. */
 	if (free_list_segregatedp[index] == NULL)
@@ -356,9 +360,9 @@ find_fit(size_t asize)
 	}
 
 	/* If we go to the next free list, the head is guaranteed to be enough size */
-	*freep = free_list_segregatedp[index + 1];
+	freep = free_list_segregatedp[index + 1];
 	if (freep != NULL) {
-		if (freep->next != NULL) {
+		if (freep->next_list != NULL) {
 			freep->next_list->prev_list = freep->prev_list;
 			free_list_segregatedp[index + 1] = freep->next_list;
 		} else {
@@ -391,12 +395,15 @@ place(void *bp, size_t asize)
 		PUT(HDRP(bp), PACK(csize - asize, 0));
 		PUT(FTRP(bp), PACK(csize - asize, 0));
 
+		
 		int index = freelistindex((csize - asize) / WSIZE);
-		struct block_list *add_block;
+		struct block_list *add_block = (struct block_list*) bp;;
 		add_block->prev_list = NULL;
 		add_block->pointer = bp;
 		add_block->next_list = free_list_segregatedp[index];
-		free_list_segregatedp[index]->prev_list = add_block;
+		if (free_list_segregatedp[index] != NULL) {
+			free_list_segregatedp[index]->prev_list = add_block;
+		}
 		free_list_segregatedp[index] = add_block;
 	} else {
 		PUT(HDRP(bp), PACK(csize, 1));
@@ -495,6 +502,19 @@ printblock(void *bp)
 	    fsize, (falloc ? 'a' : 'f'));
 }
 
+/* 
+ * Requires:
+ * 	 "bp" is the address of the newly freed block
+ * 
+ * Effects:
+ *   adds the bp to the free list
+ */
+// static void 
+// add_to_free(void *bp) {
+
+// }
+
+
 /*
  * Requires:
  *   "bp" is the address of a block.
@@ -549,7 +569,7 @@ freelistindex(int block_size) {
  * Effects:
  *   Removes the given block's pointer from the free list.
  */
-static void
+static struct block_list*
 remove_free(void* blockp) {
 	int size = GET_SIZE(HDRP(blockp));
 	int index = freelistindex(size / WSIZE);
@@ -567,9 +587,10 @@ remove_free(void* blockp) {
 			} else {
 				free_list_segregatedp[index] = NULL;
 			}
-			return;
+			return removep;
 		}
 	}
 
 	printf("Error: somehow this free block isn't in the free list");
+	return removep;
 }
