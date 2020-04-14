@@ -83,13 +83,12 @@ static void printblock(void *bp);
 /* Helper functions that we created. */
 static int freelistindex(int size);
 static struct block_list *remove_free(void* blockp);
+static void add_to_free(void* bp, int index);
 
 /* Struct for segregated free list */
 struct block_list
 {
 	struct block_list *prev_list;
-	size_t size;
-	void *pointer;
 	struct block_list *next_list;
 };
 
@@ -118,7 +117,13 @@ mm_init(void)
 	PUT(heap_listp + (1 * WSIZE), PACK(DSIZE, 1)); /* Prologue header */ 
 	PUT(heap_listp + (2 * WSIZE), PACK(DSIZE, 1)); /* Prologue footer */ 
 	PUT(heap_listp + (3 * WSIZE), PACK(0, 1));     /* Epilogue header */
+	heap_listp += 2 * WSIZE;
+
+	if (extend_heap(CHUNKSIZE / WSIZE) == NULL) {
+		return -1;
+	}
 	
+	//checkheap(true);
 	return (0);
 }
 
@@ -157,6 +162,7 @@ mm_malloc(size_t size)
 	if ((bp = extend_heap(asize / WSIZE)) == NULL)  
 		return (NULL);
 	place(bp, asize);
+	checkheap(true);
 	return (bp);
 } 
 
@@ -181,6 +187,7 @@ mm_free(void *bp)
 	PUT(HDRP(bp), PACK(size, 0));
 	PUT(FTRP(bp), PACK(size, 0));
 	coalesce(bp);
+	//checkheap(true);
 }
 
 /*
@@ -248,46 +255,35 @@ coalesce(void *bp)
 	size_t size = GET_SIZE(HDRP(bp));
 	bool prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
 	bool next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
-	struct block_list *add_block;
 	void *temp_bp;
 
 	if (prev_alloc && next_alloc) {                 /* Case 1 */
-		temp_bp = bp;
-		add_block = (struct block_list*) bp;
+		temp_bp = (struct block_list*) bp;
 	} else if (prev_alloc && !next_alloc) {         /* Case 2 */
 		remove_free(NEXT_BLKP(bp));
-		temp_bp = bp;
-		add_block = (struct block_list*) bp;
+		temp_bp = (struct block_list*) bp;
 		size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
 		PUT(HDRP(bp), PACK(size, 0));
 		PUT(FTRP(bp), PACK(size, 0));
 	} else if (!prev_alloc && next_alloc) {         /* Case 3 */
-		add_block = remove_free(PREV_BLKP(bp));
+		temp_bp = remove_free(PREV_BLKP(bp));
 		size += GET_SIZE(HDRP(PREV_BLKP(bp)));
 		PUT(FTRP(bp), PACK(size, 0));
 		PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
 		bp = PREV_BLKP(bp);
-		temp_bp = bp;
 	} else {                                        /* Case 4 */
 		remove_free(NEXT_BLKP(bp));
-		add_block = remove_free(PREV_BLKP(bp));
+		temp_bp = remove_free(PREV_BLKP(bp));
 		size += GET_SIZE(HDRP(PREV_BLKP(bp))) + 
 		    GET_SIZE(FTRP(NEXT_BLKP(bp)));
 		PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
 		PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
 		bp = PREV_BLKP(bp);
-		temp_bp = bp;
 	}
 
 	int index = freelistindex(size / WSIZE);
-	
-	add_block->prev_list = NULL;
-	add_block->pointer = temp_bp;
-	add_block->next_list = free_list_segregatedp[index];
-	if (free_list_segregatedp[index] != NULL) {
-		free_list_segregatedp[index]->prev_list = add_block;
-	}
-	free_list_segregatedp[index] = add_block;
+	add_to_free(temp_bp,index);
+	//checkheap(true);
 	return (temp_bp);
 }
 
@@ -341,19 +337,19 @@ find_fit(size_t asize)
 	struct block_list *freep = free_list_segregatedp[index];
 
 	while (freep != NULL) {
-		if (freep->size >= asize / WSIZE) {
+		if (GET_SIZE(HDRP(freep)) >= asize / WSIZE) {
 			if (freep->prev_list != NULL && freep->next_list != NULL) {
 				freep->prev_list->next_list = freep->next_list;
 				freep->next_list->prev_list = freep->prev_list;
 			} else if (freep->prev_list != NULL) {
+				freep->prev_list->next_list = freep->next_list;
+			} else if (freep->next_list != NULL) {
 				freep->next_list->prev_list = freep->prev_list;
 				free_list_segregatedp[index] = freep->next_list;
-			} else if (freep->next_list != NULL) {
-				freep->prev_list->next_list = freep->next_list;
 			} else {
 				free_list_segregatedp[index] = NULL;
 			}
-			return freep->pointer;
+			return freep;
 		} else {
 			freep = freep->next_list;
 		}
@@ -368,7 +364,7 @@ find_fit(size_t asize)
 		} else {
 			free_list_segregatedp[index + 1] = NULL;
 		}
-		return freep->pointer;
+		return freep;
 	}
 
 	return NULL;
@@ -397,14 +393,7 @@ place(void *bp, size_t asize)
 
 		
 		int index = freelistindex((csize - asize) / WSIZE);
-		struct block_list *add_block = (struct block_list*) bp;;
-		add_block->prev_list = NULL;
-		add_block->pointer = bp;
-		add_block->next_list = free_list_segregatedp[index];
-		if (free_list_segregatedp[index] != NULL) {
-			free_list_segregatedp[index]->prev_list = add_block;
-		}
-		free_list_segregatedp[index] = add_block;
+		add_to_free(bp,index);
 	} else {
 		PUT(HDRP(bp), PACK(csize, 1));
 		PUT(FTRP(bp), PACK(csize, 1));
@@ -432,13 +421,24 @@ checkblock(void *bp)
 
 	int index = freelistindex(GET_SIZE(HDRP(bp)));
 	struct block_list *i = free_list_segregatedp[index];
-	while (i != NULL) {
-		if (i->pointer == bp) {
-			printf("Found %p", bp);
+	if (!GET_ALLOC(HDRP(bp))) {
+		while (i != NULL) {
+			if (i == bp) {
+				printf("Found %p", bp);
+				return;
+			}
+			i = i->next_list;
 		}
-		i = i->next_list;
+		printf("Error: %p not in free list\n", bp);
+	} else {
+		while (i != NULL) {
+			if (i == bp) {
+				printf("Found %p when I wasn't supposed to", bp);
+				return;
+			}
+			i = i->next_list;
+		}
 	}
-	printf("Error: %p not in free list", bp);
 }
 
 /* 
@@ -471,6 +471,14 @@ checkheap(bool verbose)
 		printblock(bp);
 	if (GET_SIZE(HDRP(bp)) != 0 || !GET_ALLOC(HDRP(bp)))
 		printf("Bad epilogue header\n");
+
+	if (verbose) {
+		for (int i = 0; i < 16; i++) {
+			for (struct block_list *head = free_list_segregatedp[i]; head != NULL; head = head->next_list) {
+				printf("Block %p in free list index %u of size %zu with allocation %c\n", head, i, GET_SIZE(HDRP(head)), GET_ALLOC(HDRP(head)) ? 'a' : 'f');
+			}
+		}
+	}
 }
 
 /*
@@ -509,10 +517,16 @@ printblock(void *bp)
  * Effects:
  *   adds the bp to the free list
  */
-// static void 
-// add_to_free(void *bp) {
-
-// }
+static void 
+add_to_free(void *bp, int index) {
+	struct block_list *add_block = (struct block_list*) bp;
+	add_block->prev_list = NULL;
+	add_block->next_list = free_list_segregatedp[index];
+	if (free_list_segregatedp[index] != NULL) {
+		free_list_segregatedp[index]->prev_list = add_block;
+	}
+	free_list_segregatedp[index] = add_block;
+}
 
 
 /*
@@ -573,24 +587,38 @@ static struct block_list*
 remove_free(void* blockp) {
 	int size = GET_SIZE(HDRP(blockp));
 	int index = freelistindex(size / WSIZE);
-	struct block_list *removep = free_list_segregatedp[index];
-
-	while (removep != NULL) {
-		if (removep->pointer == blockp) {
-			if (removep->next_list != NULL && removep->prev_list != NULL) {
-				removep->next_list->prev_list = removep->prev_list;
-				removep->prev_list->next_list = removep->next_list;
-			} else if (removep->next_list != NULL) {
-				removep->prev_list->next_list = removep->next_list;
-			} else if (removep->prev_list != NULL) {
-				removep->next_list->prev_list = removep->prev_list;
-			} else {
-				free_list_segregatedp[index] = NULL;
-			}
-			return removep;
-		}
+	struct block_list *removep = (struct block_list*) blockp;
+	if(removep->next_list == NULL && removep->prev_list == NULL) {
+		free_list_segregatedp[index] = NULL;
+	} else if(removep->next_list != NULL && removep->prev_list != NULL) {
+		removep->next_list->prev_list = removep->prev_list;
+		removep->prev_list->next_list = removep->next_list;
+	} else if(removep->next_list != NULL && removep->prev_list == NULL) {
+		free_list_segregatedp[index] = removep->next_list;
+	} else {
+		//next == null, prev != null;
+		removep->prev_list->next_list = NULL;
 	}
 
-	printf("Error: somehow this free block isn't in the free list");
+
+
+		// if (removep == blockp) {
+		// 	if (removep->next_list != NULL && removep->prev_list != NULL) {
+		// 		struct block_list *next = removep->next_list;
+		// 		struct block_list *prev = removep->prev_list;
+		// 		removep->next_list->prev_list = prev;
+		// 		removep->prev_list->next_list = next;
+		// 	} else if (removep->next_list != NULL) {
+		// 		removep->next_list->prev_list = NULL;
+		// 	} else if (removep->prev_list != NULL) {
+		// 		removep->prev_list->next_list = NULL;
+		// 	} else {
+		// 		free_list_segregatedp[index] = NULL;
+		// 		removep->prev_list = NULL;
+		// 		removep->next_list = NULL;
+		// 	}
+		// 	return removep;
+		// }
+
 	return removep;
 }
