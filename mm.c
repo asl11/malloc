@@ -84,9 +84,14 @@ static void printblock(void *bp);
 static int freelistindex(int size);
 static struct block_list *remove_free(void* blockp);
 static void add_to_free(void* bp, int index);
+#define LOG2(X) ((unsigned) (8*sizeof (unsigned long long) - __builtin_clzll((X)) - 1))
+
 
 /* verbose */
 static bool verbose = false;
+
+/* coalesce alternator */
+//static int coalesce_count = 0;
 
 /* Struct for segregated free list */
 struct block_list
@@ -244,6 +249,16 @@ mm_realloc(void *ptr, size_t size)
 	if (ptr == NULL)
 		return (mm_malloc(size));
 
+	oldsize = GET_SIZE(HDRP(ptr));
+	size_t nextsize = GET_SIZE(HDRP(NEXT_BLKP(ptr)));
+	if (oldsize + nextsize > size && !GET_ALLOC(HDRP(NEXT_BLKP(ptr)))) {
+		oldsize += nextsize;
+		remove_free(NEXT_BLKP(ptr));
+		PUT(HDRP(ptr), PACK(oldsize, 1));
+		PUT(FTRP(ptr), PACK(oldsize, 1));
+		return ptr;
+	}
+
 	newptr = mm_malloc(size);
 
 	/* If realloc() fails the original block is left untouched  */
@@ -251,7 +266,6 @@ mm_realloc(void *ptr, size_t size)
 		return (NULL);
 
 	/* Copy the old data. */
-	oldsize = GET_SIZE(HDRP(ptr));
 	if (size < oldsize)
 		oldsize = size;
 	memcpy(newptr, ptr, oldsize);
@@ -277,7 +291,14 @@ mm_realloc(void *ptr, size_t size)
 static void *
 coalesce(void *bp) 
 {
+
 	size_t size = GET_SIZE(HDRP(bp));
+	// if (coalesce_count % 10 == 0) {
+	// 	int index = freelistindex(size / WSIZE);
+	// 	add_to_free(bp,index);
+	// 	coalesce_count++;
+	// 	return bp;
+	// }
 	bool prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
 	bool next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
 	void *temp_bp;
@@ -615,42 +636,51 @@ add_to_free(void *bp, int index) {
  */
 static int
 freelistindex(int block_size) {
-	int index = -1;
-	if (block_size < 2) {
-		index = 0;
-	} else if (block_size < pow(2, 2) && block_size >= 2) {
-		index = 1;
-	} else if (block_size < pow(2, 3) && block_size >= pow(2, 2)) {
-		index = 2;
-	} else if (block_size < pow(2, 4) && block_size >= pow(2, 3)) {
-		index = 3;
-	} else if (block_size < pow(2, 5) && block_size >= pow(2, 4)) {
-		index = 4;
-	} else if (block_size < pow(2, 6) && block_size >= pow(2, 5)) {
-		index = 5;
-	} else if (block_size < pow(2, 7) && block_size >= pow(2, 6)) {
-		index = 6;
-	} else if (block_size < pow(2, 8) && block_size >= pow(2, 7)) {
-		index = 7;
-	} else if (block_size < pow(2, 9) && block_size >= pow(2, 8)) {
-		index = 8;
-	} else if (block_size < pow(2, 10) && block_size >= pow(2, 9)) {
-		index = 9;
-	} else if (block_size < pow(2, 11) && block_size >= pow(2, 10)) {
-		index = 10;
-	} else if (block_size < pow(2, 12) && block_size >= pow(2, 11)) {
-		index = 11;
-	} else if (block_size < pow(2, 13) && block_size >= pow(2, 12)) {
-		index = 12;
-	} else if (block_size < pow(2, 14) && block_size >= pow(2, 13)) {
-		index = 13;
-	} else if (block_size < pow(2, 15) && block_size >= pow(2, 14)) {
-		index = 14;
-	} else {
-		index = 15;
-	}
+	// int index = -1;
+	// if (block_size < 2) {
+	// 	index = 0;
+	// } else if (block_size < pow(2, 2) && block_size >= 2) {
+	// 	index = 1;
+	// } else if (block_size < pow(2, 3) && block_size >= pow(2, 2)) {
+	// 	index = 2;
+	// } else if (block_size < pow(2, 4) && block_size >= pow(2, 3)) {
+	// 	index = 3;
+	// } else if (block_size < pow(2, 5) && block_size >= pow(2, 4)) {
+	// 	index = 4;
+	// } else if (block_size < pow(2, 6) && block_size >= pow(2, 5)) {
+	// 	index = 5;
+	// } else if (block_size < pow(2, 7) && block_size >= pow(2, 6)) {
+	// 	index = 6;
+	// } else if (block_size < pow(2, 8) && block_size >= pow(2, 7)) {
+	// 	index = 7;
+	// } else if (block_size < pow(2, 9) && block_size >= pow(2, 8)) {
+	// 	index = 8;
+	// } else if (block_size < pow(2, 10) && block_size >= pow(2, 9)) {
+	// 	index = 9;
+	// } else if (block_size < pow(2, 11) && block_size >= pow(2, 10)) {
+	// 	index = 10;
+	// } else if (block_size < pow(2, 12) && block_size >= pow(2, 11)) {
+	// 	index = 11;
+	// } else if (block_size < pow(2, 13) && block_size >= pow(2, 12)) {
+	// 	index = 12;
+	// } else if (block_size < pow(2, 14) && block_size >= pow(2, 13)) {
+	// 	index = 13;
+	// } else if (block_size < pow(2, 15) && block_size >= pow(2, 14)) {
+	// 	index = 14;
+	// } else {
+	// 	index = 15;
+	// }
 
-	return index;
+
+	//printf("got block size %u, returned %u, where index got %u\n", block_size, LOG2(block_size), index);
+	int index = LOG2(block_size);
+	if (index <= 4) {
+		index = 0; 
+	} else {
+		index -= 4;
+	}
+	return index < 13 ? index : 12;
+
 }
 
 /*

@@ -5,7 +5,7 @@ LDLIBS  = -lm
 OBJS    = mdriver.o mm.o memlib.o fsecs.o fcyc.o clock.o ftimer.o
 
 mdriver: ${OBJS}
-	${CC} ${CFLAGS} -o mdriver ${OBJS} ${LDLIBS}
+	${CC} ${CFLAGS} -o mdriver -pg ${OBJS} ${LDLIBS}
 
 mdriver.o: mdriver.c fsecs.h fcyc.h clock.h memlib.h config.h mm.h
 memlib.o: memlib.c memlib.h

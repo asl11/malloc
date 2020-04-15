@@ -1,13 +1,19 @@
 COMP 321 Project 5: Malloc
-<Insert your name(s) and NetID(s).>
+Alex Li asl11
 
 ---(Do not write lines of text that exceed the width of this line.)------------
 
 DESIGN DESCRIPTION
 
-<Insert an English description of your submission's design.  Do not submit
-pseudo-code.  Describe any design decisions that you made, such as the data
-structures and algorithms that you used.> 
+We implement a LIFO Segregated free list where we store 16 free lists in the heap before the prologue header. Then, when a block is freed we put it in the associated free list, and create a linked list to the next free block of the same block size range. Essentially, we store an array of linked lists, where each array index stores the pointer of a free block of a certain size range, as well as a pointer to the next free block of that size range, if one exists. 
+
+We have two important helper methods: add_to_free, which adds a block to the right free list, as well as remove_from_free, which removes a block from the free list in the case that they've been coalesced or allocated by malloc. 
+
+We set up the segregated free lists to go by powers of two, where the first one contains free blocks sized 1 to 2, the second 3 to 4, etc.
+
+We coalesce whenever a block is freed, and we also split excess memory off when we allocate. For example, if malloc asks for a certain amount of memory but we gave it a larger free block, we will cut off the excess memory block and add it back to the appropriate free list.
+
+To improve realloc, we check if the next block is free and is sufficiently large so that we don't have to copy the memory from the current block, and can instead just return the same block after adjusting for the new size in the block's header/footer, essentially coalescing the next block in the case that realloc can just use the next block's space. 
 
 TESTING STRATEGY
 
