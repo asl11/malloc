@@ -85,6 +85,9 @@ static int freelistindex(int size);
 static struct block_list *remove_free(void* blockp);
 static void add_to_free(void* bp, int index);
 
+/* verbose */
+static bool verbose = false;
+
 /* Struct for segregated free list */
 struct block_list
 {
@@ -122,7 +125,8 @@ mm_init(void)
 	if (extend_heap(CHUNKSIZE / WSIZE) == NULL) {
 		return -1;
 	}
-	
+	if (verbose)
+		printf("init with %zu words\n", CHUNKSIZE/WSIZE);
 	//checkheap(true);
 	return (0);
 }
@@ -152,17 +156,33 @@ mm_malloc(size_t size)
 	else
 		asize = DSIZE * ((size + DSIZE + (DSIZE - 1)) / DSIZE);
 
+	if (verbose)
+		printf("Malloc asked for size %zu gave block of size %zu \n", size, asize);
+
+
 	/* Search the free list for a fit. */
-	if ((bp = find_fit(asize)) != NULL) {
+	bp = find_fit(asize);
+	if (bp != NULL) {
+		if (verbose) {
+			printf("place found in free list\n");
+			printf("block of size %zu\n", GET_SIZE(HDRP(bp)));
+		}
+
 		place(bp, asize);
 		return (bp);
 	}
 
 	/* No fit found.  Get more memory and place the block. */
+
+	if (verbose)
+		printf("place done by extending heap \n");
 	if ((bp = extend_heap(asize / WSIZE)) == NULL)  
 		return (NULL);
 	place(bp, asize);
-	checkheap(true);
+	
+
+
+	//checkheap(true);
 	return (bp);
 } 
 
@@ -178,6 +198,8 @@ mm_free(void *bp)
 {
 	size_t size;
 
+	if (verbose)
+		printf("freeing %p of size %zu \n", bp, GET_SIZE(HDRP(bp)));
 	/* Ignore spurious requests. */
 	if (bp == NULL)
 		return;
@@ -208,6 +230,9 @@ mm_realloc(void *ptr, size_t size)
 {
 	size_t oldsize;
 	void *newptr;
+
+	if (verbose)
+		printf("reallocing %p of oldsize %zu to new size %zu\n", ptr, GET_SIZE(HDRP(ptr)), size);
 
 	/* If size == 0 then this is just free, and we return NULL. */
 	if (size == 0) {
@@ -256,22 +281,32 @@ coalesce(void *bp)
 	bool prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
 	bool next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
 	void *temp_bp;
+	if (verbose)
+		printf("Coalescing: ");
 
 	if (prev_alloc && next_alloc) {                 /* Case 1 */
+		if (verbose)
+			printf("no coalesce possible \n");
 		temp_bp = (struct block_list*) bp;
 	} else if (prev_alloc && !next_alloc) {         /* Case 2 */
+		if (verbose)
+			printf("removing next, adding to current\n");
 		remove_free(NEXT_BLKP(bp));
 		temp_bp = (struct block_list*) bp;
 		size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
 		PUT(HDRP(bp), PACK(size, 0));
 		PUT(FTRP(bp), PACK(size, 0));
 	} else if (!prev_alloc && next_alloc) {         /* Case 3 */
+		if (verbose)
+			printf("removing current, adding to prev\n");
 		temp_bp = remove_free(PREV_BLKP(bp));
 		size += GET_SIZE(HDRP(PREV_BLKP(bp)));
 		PUT(FTRP(bp), PACK(size, 0));
 		PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
 		bp = PREV_BLKP(bp);
 	} else {                                        /* Case 4 */
+		if (verbose)
+			printf("removing next and current, adding to prev\n");
 		remove_free(NEXT_BLKP(bp));
 		temp_bp = remove_free(PREV_BLKP(bp));
 		size += GET_SIZE(HDRP(PREV_BLKP(bp))) + 
@@ -311,7 +346,8 @@ extend_heap(size_t words)
 	PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1)); /* New epilogue header */
 
 	/* Coalesce if the previous block was free. */
-	return (coalesce(bp));
+	// return (coalesce(bp));
+	return bp;
 }
 
 /*
@@ -329,41 +365,63 @@ find_fit(size_t asize)
 		printf("Error: you did something wrong");
 
 	int index = freelistindex(asize / WSIZE);
-
-	/* No fit was found. */
-	if (free_list_segregatedp[index] == NULL)
-		return NULL;
+	if (verbose)
+		printf("looking for size %zu at index %u in find_fit with asize %zu\n", asize / WSIZE, index, asize);
+	
 
 	struct block_list *freep = free_list_segregatedp[index];
 
 	while (freep != NULL) {
-		if (GET_SIZE(HDRP(freep)) >= asize / WSIZE) {
+		if (GET_SIZE(HDRP(freep)) >= asize) {
 			if (freep->prev_list != NULL && freep->next_list != NULL) {
 				freep->prev_list->next_list = freep->next_list;
 				freep->next_list->prev_list = freep->prev_list;
 			} else if (freep->prev_list != NULL) {
-				freep->prev_list->next_list = freep->next_list;
+				freep->prev_list->next_list = NULL;
 			} else if (freep->next_list != NULL) {
-				freep->next_list->prev_list = freep->prev_list;
+				freep->next_list->prev_list = NULL;
 				free_list_segregatedp[index] = freep->next_list;
 			} else {
 				free_list_segregatedp[index] = NULL;
 			}
+			if (verbose) 
+				printf("found block %p of size %zu in index %u\n", freep, GET_SIZE(HDRP(freep)), index);
 			return freep;
 		} else {
 			freep = freep->next_list;
 		}
 	}
 
+	if (index == 15) {
+		return NULL;
+	}
 	/* If we go to the next free list, the head is guaranteed to be enough size */
 	freep = free_list_segregatedp[index + 1];
 	if (freep != NULL) {
 		if (freep->next_list != NULL) {
-			freep->next_list->prev_list = freep->prev_list;
+			freep->next_list->prev_list = NULL;
 			free_list_segregatedp[index + 1] = freep->next_list;
 		} else {
 			free_list_segregatedp[index + 1] = NULL;
 		}
+		if (verbose) 
+			printf("found block %p of size %zu in index %u\n", freep, GET_SIZE(HDRP(freep)), index);
+		return freep;
+	}
+
+	if (index == 14) {
+		return NULL;
+	}
+	freep = free_list_segregatedp[index + 2];
+	if (freep != NULL) {
+		if (freep->next_list != NULL) {
+			freep->next_list->prev_list = NULL;
+			free_list_segregatedp[index + 2] = freep->next_list;
+		} else {
+			free_list_segregatedp[index + 2] = NULL;
+		}
+		if (verbose) 
+			printf("found block %p of size %zu in index %u\n", freep, GET_SIZE(HDRP(freep)), index);
 		return freep;
 	}
 
@@ -391,7 +449,10 @@ place(void *bp, size_t asize)
 		PUT(HDRP(bp), PACK(csize - asize, 0));
 		PUT(FTRP(bp), PACK(csize - asize, 0));
 
-		
+		if (verbose) {
+			printf("cut %p out for free list of size %zu \n", bp, GET_SIZE(HDRP(bp)));
+			printf("csize - asize / wsize = %zu - %zu / %zu : %zu\n", csize, asize, WSIZE, (csize - asize)/WSIZE);
+		}
 		int index = freelistindex((csize - asize) / WSIZE);
 		add_to_free(bp,index);
 	} else {
@@ -431,13 +492,16 @@ checkblock(void *bp)
 		}
 		printf("Error: %p not in free list\n", bp);
 	} else {
-		while (i != NULL) {
-			if (i == bp) {
-				printf("Found %p when I wasn't supposed to", bp);
-				return;
-			}
-			i = i->next_list;
-		}
+		// while (i != NULL) {
+		// 	if (i == bp) {
+		// 		printf("Found %p when I wasn't supposed to", bp);
+		// 		return;
+		// 	}
+		// 	if (i == NULL || i->next_list == NULL) {
+		// 		break;
+		// 	}
+		// 	i = i->next_list;
+		// }
 	}
 }
 
@@ -475,6 +539,10 @@ checkheap(bool verbose)
 	if (verbose) {
 		for (int i = 0; i < 16; i++) {
 			for (struct block_list *head = free_list_segregatedp[i]; head != NULL; head = head->next_list) {
+				if (head == head->next_list) {
+					printf("Screwed up here on %p", head);
+					return;
+				}
 				printf("Block %p in free list index %u of size %zu with allocation %c\n", head, i, GET_SIZE(HDRP(head)), GET_ALLOC(HDRP(head)) ? 'a' : 'f');
 			}
 		}
@@ -486,7 +554,7 @@ checkheap(bool verbose)
  *   "bp" is the address of a block.
  *
  * Effects:
- *   Print the block "bp".
+ *   Print the block "bp".   
  */
 static void
 printblock(void *bp) 
@@ -519,13 +587,22 @@ printblock(void *bp)
  */
 static void 
 add_to_free(void *bp, int index) {
+	if (verbose)
+		printf("Adding %p to free list at index %u of size %zu\n", bp, index, GET_SIZE(HDRP(bp)));
+
 	struct block_list *add_block = (struct block_list*) bp;
 	add_block->prev_list = NULL;
-	add_block->next_list = free_list_segregatedp[index];
+	add_block->next_list = free_list_segregatedp[index] != NULL ? free_list_segregatedp[index] : NULL;
 	if (free_list_segregatedp[index] != NULL) {
 		free_list_segregatedp[index]->prev_list = add_block;
 	}
 	free_list_segregatedp[index] = add_block;
+
+	if (verbose)
+		printf("free list at index %u now is headed by %p\n", index, free_list_segregatedp[index]);
+	if (free_list_segregatedp[index] != NULL && verbose) {
+		printf("head connected to next: %p and prev: %p\n", free_list_segregatedp[index]->next_list, free_list_segregatedp[index]->prev_list);
+	}
 }
 
 
@@ -588,6 +665,10 @@ remove_free(void* blockp) {
 	int size = GET_SIZE(HDRP(blockp));
 	int index = freelistindex(size / WSIZE);
 	struct block_list *removep = (struct block_list*) blockp;
+	if (verbose) {
+		printf("removing %p from index %u of size %u \n", blockp, index, size);
+		printf("free list at index %u headed by %p before removal \n", index, free_list_segregatedp[index]);
+	}
 	if(removep->next_list == NULL && removep->prev_list == NULL) {
 		free_list_segregatedp[index] = NULL;
 	} else if(removep->next_list != NULL && removep->prev_list != NULL) {
@@ -595,10 +676,17 @@ remove_free(void* blockp) {
 		removep->prev_list->next_list = removep->next_list;
 	} else if(removep->next_list != NULL && removep->prev_list == NULL) {
 		free_list_segregatedp[index] = removep->next_list;
+		free_list_segregatedp[index]->prev_list = NULL;
 	} else {
 		//next == null, prev != null;
 		removep->prev_list->next_list = NULL;
 	}
+	if (verbose)
+		printf("free list at index %u headed by %p after removal \n", index, free_list_segregatedp[index]);
+	if (free_list_segregatedp[index] != NULL && verbose) {
+		printf("head connected to next: %p and prev: %p\n", free_list_segregatedp[index]->next_list, free_list_segregatedp[index]->prev_list);
+	}
+
 
 
 
