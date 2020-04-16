@@ -127,9 +127,12 @@ mm_init(void)
 	PUT(heap_listp + (3 * WSIZE), PACK(0, 1));     /* Epilogue header */
 	heap_listp += 2 * WSIZE;
 
-	if (extend_heap(CHUNKSIZE / WSIZE) == NULL) {
+	void *bp = extend_heap(CHUNKSIZE / WSIZE);
+	if (bp == NULL) {
 		return -1;
 	}
+
+	add_to_free(bp, freelistindex(CHUNKSIZE));
 	if (verbose)
 		printf("init with %zu words\n", CHUNKSIZE/WSIZE);
 	//checkheap(true);
@@ -213,7 +216,8 @@ mm_free(void *bp)
 	size = GET_SIZE(HDRP(bp));
 	PUT(HDRP(bp), PACK(size, 0));
 	PUT(FTRP(bp), PACK(size, 0));
-	coalesce(bp);
+	add_to_free(bp, freelistindex(size));
+	//coalesce(bp);
 	//checkheap(true);
 }
 
@@ -293,7 +297,7 @@ coalesce(void *bp)
 {
 
 	size_t size = GET_SIZE(HDRP(bp));
-	// if (coalesce_count % 10 == 0) {
+	// if (coalesce_count % 1000 != 0 || true) {
 	// 	int index = freelistindex(size / WSIZE);
 	// 	add_to_free(bp,index);
 	// 	coalesce_count++;
@@ -337,8 +341,8 @@ coalesce(void *bp)
 		bp = PREV_BLKP(bp);
 	}
 
-	int index = freelistindex(size / WSIZE);
-	add_to_free(temp_bp,index);
+	//int index = freelistindex(size);
+	//add_to_free(temp_bp,index);
 	//checkheap(true);
 	return (temp_bp);
 }
@@ -361,14 +365,16 @@ extend_heap(size_t words)
 	if ((bp = mem_sbrk(size)) == (void *)-1)  
 		return (NULL);
 
+	//printf("extending by %zu\n", size);
+
 	/* Initialize free block header/footer and the epilogue header. */
 	PUT(HDRP(bp), PACK(size, 0));         /* Free block header */
 	PUT(FTRP(bp), PACK(size, 0));         /* Free block footer */
 	PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1)); /* New epilogue header */
 
 	/* Coalesce if the previous block was free. */
-	// return (coalesce(bp));
-	return bp;
+	return (coalesce(bp));
+	//return bp;
 }
 
 /*
@@ -385,7 +391,7 @@ find_fit(size_t asize)
 	if (asize % WSIZE != 0)
 		printf("Error: you did something wrong");
 
-	int index = freelistindex(asize / WSIZE);
+	int index = freelistindex(asize);
 	if (verbose)
 		printf("looking for size %zu at index %u in find_fit with asize %zu\n", asize / WSIZE, index, asize);
 	
@@ -417,36 +423,27 @@ find_fit(size_t asize)
 		return NULL;
 	}
 	/* If we go to the next free list, the head is guaranteed to be enough size */
-	freep = free_list_segregatedp[index + 1];
-	if (freep != NULL) {
-		if (freep->next_list != NULL) {
-			freep->next_list->prev_list = NULL;
-			free_list_segregatedp[index + 1] = freep->next_list;
-		} else {
-			free_list_segregatedp[index + 1] = NULL;
-		}
-		if (verbose) 
-			printf("found block %p of size %zu in index %u\n", freep, GET_SIZE(HDRP(freep)), index);
-		return freep;
-	}
 
-	if (index == 14) {
-		return NULL;
-	}
-	freep = free_list_segregatedp[index + 2];
-	if (freep != NULL) {
-		if (freep->next_list != NULL) {
-			freep->next_list->prev_list = NULL;
-			free_list_segregatedp[index + 2] = freep->next_list;
-		} else {
-			free_list_segregatedp[index + 2] = NULL;
+	index += 1;
+	while(index < 16) {
+		freep = free_list_segregatedp[index];
+		if (freep != NULL) {
+			if (freep->next_list != NULL) {
+				freep->next_list->prev_list = NULL;
+				free_list_segregatedp[index] = freep->next_list;
+			} else {
+				free_list_segregatedp[index] = NULL;
+			}
+			if (verbose) 
+				printf("found block %p of size %zu in index %u\n", freep, GET_SIZE(HDRP(freep)), index);
+			return freep;
 		}
-		if (verbose) 
-			printf("found block %p of size %zu in index %u\n", freep, GET_SIZE(HDRP(freep)), index);
-		return freep;
+		index += 1;
 	}
 
 	return NULL;
+
+
 }
 
 /* 
@@ -474,7 +471,7 @@ place(void *bp, size_t asize)
 			printf("cut %p out for free list of size %zu \n", bp, GET_SIZE(HDRP(bp)));
 			printf("csize - asize / wsize = %zu - %zu / %zu : %zu\n", csize, asize, WSIZE, (csize - asize)/WSIZE);
 		}
-		int index = freelistindex((csize - asize) / WSIZE);
+		int index = freelistindex(csize - asize);
 		add_to_free(bp,index);
 	} else {
 		PUT(HDRP(bp), PACK(csize, 1));
@@ -639,41 +636,42 @@ freelistindex(int block_size) {
 	// int index = -1;
 	// if (block_size < 2) {
 	// 	index = 0;
-	// } else if (block_size < pow(2, 2) && block_size >= 2) {
+	// } else if (block_size < 4) {
 	// 	index = 1;
-	// } else if (block_size < pow(2, 3) && block_size >= pow(2, 2)) {
+	// } else if (block_size < 8) {
 	// 	index = 2;
-	// } else if (block_size < pow(2, 4) && block_size >= pow(2, 3)) {
+	// } else if (block_size < 16) {
 	// 	index = 3;
-	// } else if (block_size < pow(2, 5) && block_size >= pow(2, 4)) {
+	// } else if (block_size < 32) {
 	// 	index = 4;
-	// } else if (block_size < pow(2, 6) && block_size >= pow(2, 5)) {
+	// } else if (block_size < 64) {
 	// 	index = 5;
-	// } else if (block_size < pow(2, 7) && block_size >= pow(2, 6)) {
+	// } else if (block_size < 128) {
 	// 	index = 6;
-	// } else if (block_size < pow(2, 8) && block_size >= pow(2, 7)) {
+	// } else if (block_size < 256) {
 	// 	index = 7;
-	// } else if (block_size < pow(2, 9) && block_size >= pow(2, 8)) {
+	// } else if (block_size < 512) {
 	// 	index = 8;
-	// } else if (block_size < pow(2, 10) && block_size >= pow(2, 9)) {
+	// } else if (block_size < 1024) {
 	// 	index = 9;
-	// } else if (block_size < pow(2, 11) && block_size >= pow(2, 10)) {
+	// } else if (block_size < 2048) {
 	// 	index = 10;
-	// } else if (block_size < pow(2, 12) && block_size >= pow(2, 11)) {
+	// } else if (block_size < 4096) {
 	// 	index = 11;
-	// } else if (block_size < pow(2, 13) && block_size >= pow(2, 12)) {
+	// } else if (block_size < 8192) {
 	// 	index = 12;
-	// } else if (block_size < pow(2, 14) && block_size >= pow(2, 13)) {
+	// } else if (block_size < 16384) {
 	// 	index = 13;
-	// } else if (block_size < pow(2, 15) && block_size >= pow(2, 14)) {
+	// } else if (block_size < 32768) {
 	// 	index = 14;
 	// } else {
 	// 	index = 15;
 	// }
+	// return index;
 
 
 	//printf("got block size %u, returned %u, where index got %u\n", block_size, LOG2(block_size), index);
-	int index = LOG2(block_size);
+	uint64_t index = LOG2(block_size);
 	if (index <= 4) {
 		index = 0; 
 	} else {
@@ -693,7 +691,7 @@ freelistindex(int block_size) {
 static struct block_list*
 remove_free(void* blockp) {
 	int size = GET_SIZE(HDRP(blockp));
-	int index = freelistindex(size / WSIZE);
+	int index = freelistindex(size);
 	struct block_list *removep = (struct block_list*) blockp;
 	if (verbose) {
 		printf("removing %p from index %u of size %u \n", blockp, index, size);
