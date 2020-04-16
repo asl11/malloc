@@ -105,7 +105,7 @@ int
 mm_init(void) 
 {
 	// Initialize memory for storing the free list in the heap, error check.
-	if ((free_list_segregatedp = mem_sbrk(4 * WSIZE + 12 * sizeof(void*))) ==
+	if ((free_list_segregatedp = mem_sbrk(2 * 12 * sizeof(void*))) ==
 		(void*)-1)
 		return (-1);
 
@@ -116,7 +116,8 @@ mm_init(void)
 	}
 
 	// Correctly align the start of the heap_list to account for free list.
-	heap_listp = ((char *) free_list_segregatedp) + 12 * sizeof(void*);
+	if ((heap_listp = mem_sbrk(4 * WSIZE)) == (void *)-1)
+ 		return (-1);
 
 	PUT(heap_listp, 0);                            /* Alignment padding */
 	PUT(heap_listp + (1 * WSIZE), PACK(DSIZE, 1)); /* Prologue header */ 
