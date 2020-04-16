@@ -5,19 +5,132 @@ Alex Li asl11
 
 DESIGN DESCRIPTION
 
-We implement a LIFO Segregated free list where we store 16 free lists in the heap before the prologue header. Then, when a block is freed we put it in the associated free list, and create a linked list to the next free block of the same block size range. Essentially, we store an array of linked lists, where each array index stores the pointer of a free block of a certain size range, as well as a pointer to the next free block of that size range, if one exists. 
+We implement a LIFO Segregated free list where we store 12 free lists in the
+heap before the prologue header. We contain pointers to all of the free lists
+in an array that is stored in the beginning of the heap before the prologue.
+Then, when a block is freed we put it at the head of the the associated free
+list. We use a helper function called freelistindex to put the block into the
+correct doubly linked list as each linked list in our array corresponds to a
+different range of block values. Once we make the block the head of the doubly
+linked list, we connect it to the the next free block of the same block size
+range if there are other blocks in the free list. Essentially, we store an
+array of doubly linked lists, where each array index stores the pointer of a
+free block of a certain size range, as well as a pointer to the next free
+block of that size range, if one exists. 
 
-We have two important helper methods: add_to_free, which adds a block to the right free list, as well as remove_from_free, which removes a block from the free list in the case that they've been coalesced or allocated by malloc. 
+We set up the segregated free lists to go by powers of two, where the first
+one contains free blocks sized below or equal to 16, the second 17 to 32, etc.
+We have 12 different segregated free lists.
 
-We set up the segregated free lists to go by powers of two, where the first one contains free blocks sized 1 to 2, the second 3 to 4, etc.
+Now we'll go into specifics into each function:
 
-We coalesce whenever a block is freed, and we also split excess memory off when we allocate. For example, if malloc asks for a certain amount of memory but we gave it a larger free block, we will cut off the excess memory block and add it back to the appropriate free list.
+mm_init: The changes we made to mm_init were only to create space before the
+prologue header of the heap for our array of doubly linked lists that had
+pointers to all of the segregated free lists. Thus we use mem_sbrk to allocate
+enough memory for 2 * 12 pointers since we need two pointers for every block
+of our doubly linked free list, and then we do the rest of init as was in the
+starter code.
 
-To improve realloc, we check if the next block is free and is sufficiently large so that we don't have to copy the memory from the current block, and can instead just return the same block after adjusting for the new size in the block's header/footer, essentially coalescing the next block in the case that realloc can just use the next block's space. 
+mm_malloc/mm_free/extend_heap:
+We didn't change either of these from the starter code, instead opting to
+make the changes inside of find_fit, coalesce, and place.
+
+coalesce:
+The main changes we made to coalesce is that, once we check which blocks the
+given block is next to in the head are allocated, we remove the respective
+blocks from the correct segregated free list using helper functions we
+wrote such as freelistindex and remove_free (more on that later) and once
+coalesced, we add the block back into free.
+
+find_fit:
+In find_fit, we go to the segregated free list corresponding to the given size
+and iterate through our doubly linked list sequentially, checking to see if
+any block in the free list is large enough to be used for the memory of the
+size given. If there is, we remove it from the free list and return the
+pointer. If not, we check the up to the next 4 free lists ahead of the index
+we were at and see if any of those, checking sequentially, have any free
+blocks. If there is any blocks in any of these lists, we know they must be big
+enough to fit the memory we need, so we return that block and remove it from
+the free list. If no block of suitable size is found we simply return NULL.
+
+place:
+The only change we made to place from the starter code is if we are given a
+block of memory that is larger than 2 * DSIZE that we need, then we "cut off"
+the end of the block and make a new free block that we add back into the free
+list.
+
+add_to_free:
+This helper function is very straight forward. Given a pointer to a block in
+the free list, check if there is any values in the proper free list. If not,
+make this value the new head and set its next to NULL. Otherwise, if there
+are blocks in the free list, still set this new block as the head, but set
+the pointer to the next block as the old head and set the old head's previous
+block pointer to this new head.
+
+Given a pointer to
+a block in memory that is in the segregated free list, check if it is either
+the only block in its respective segregated free list, the head, the tail, or
+none of the above. Given the case, remove from the free list and return its
+pointer.
+
+freelistindex:
+A very simple functoin that goes through a series of if statements given a
+size, and based off of this size returns the proper index to the segregated
+free list array to either add/remove/or look for a free block.
+
+realloc:
+To improve realloc, we check if the next block is free and if coalescing the
+next block with this current block would be sufficiently large so that we
+don't have to copy the memory from the current block, and can instead just
+return the same block after adjusting for the new size in the block's
+header/footer, essentially coalescing the next block in the case that realloc
+can just use the next block's space. 
+
 
 TESTING STRATEGY
 
-<Insert a detailed description of your testing strategy: At a minimum,
-you should explain how you tested your code, how you selected your inputs,
-what those inputs were, and why you believe those inputs were sufficient
-to test your code.>
+We started off by implementing checkblock and checkheap. We made it so that
+checkblock, given a pointer to a block in memory, would, in addition to the
+checks that were in the starter code, would first check if the block was
+free or not. If the block was free, it would go into the proper segregated
+free list (found using freelistindex) and iterate through until it either
+found the block in the free list or would printf a message saying that the
+specific block was free but not in the free list. If the block was not free,
+it would still go to the proper segregated free list and check to see if the
+block was erroneously in the free list, and if it somehow does find it then
+it would printf an error message.
+
+In checkheap, we check every single block in the heap with checkblock, and
+After that, if our input is true, then we print out the entire segregated
+free list by using a nested for loop, where the outer for loop goes through
+each index from 0 to 11, and the inner for loop iterates through each block
+in the corresponding free list and prints each one out.
+
+After that we started off by trying to pass the given tracers of
+short1-bal.rep and short2-bal.rep without implementing mm_realloc, instead
+focusing on making sure that mm_malloc and mm_free did what we needed.
+To give insight into why specific calls were failing, we included several
+print statements in key functions such as malloc, free, add_to_free,
+remove_free, etc., that would only print if we used the verbose flag (we
+removed these from the code in the final commit but can be found in
+previous commits). Then, we would use gdb and calls to checkheap in
+conjunction with the prints from our verbose in order to find out what
+happened before a certain error, such as a segmentation fault, occurred.
+We did this same strategy to as we tried the other tracers such as
+binary and cccp and random, and continued to do so moving forward as we
+implemented mm_realloc.
+
+Finally, when we passed all of the tracers, we would brainstorm methods
+to increase both our util and throughput, and would try to implement them,
+using our previous strategy if we run into any errors, and then compare
+our util and throughput values, keeping the changes if these values were
+successfully increased.
+
+We know that our testing was sufficient because of the code coverage the
+given tracers give us. For example, we know that most, if not all, of these
+tracers, from all of the print statements we used, will end up calling
+all of the methods that we implemented/changed and test all of the possible
+cases we forsaw. Also, there are specific tracers for functions such as
+mm_realloc which are not testing in most of the tracers. Therefore, the
+tracers give us almost ocmplete code coverage and test all parts of our
+code, so we believe these tests to be sufficient.
