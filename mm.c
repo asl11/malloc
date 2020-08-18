@@ -1,7 +1,7 @@
 /* 
- * Simple, 32-bit and 64-bit clean allocator based on an implicit free list,
+ * Simple, 32-bit and 64-bit clean allocator based on an explicit segregated free list,
  * first fit placement, and boundary tag coalescing, as described in the
- * CS:APP3e text.  Blocks are aligned to double-word boundaries.  This
+ * Blocks are aligned to double-word boundaries.  This
  * yields 8-byte aligned blocks on a 32-bit processor, and 16-byte aligned
  * blocks on a 64-bit processor.  However, 16-byte alignment is stricter
  * than necessary; the assignment only requires 8-byte alignment.  The
@@ -21,23 +21,6 @@
 
 #include "memlib.h"
 #include "mm.h"
-
-/*********************************************************
- * NOTE TO STUDENTS: Before you do anything else, please
- * provide your team information in the following struct.
- ********************************************************/
-team_t team = {
-	/* Team name */
-	"Team LiLee",
-	/* First member's full name */
-	"Alexander Li",
-	/* First member's NetID */
-	"asl11",
-	/* Second member's full name (leave blank if none) */
-	"Christopher Lee",
-	/* Second member's NetID (leave blank if none) */
-	"chl4"
-};
 
 /* Basic constants and macros: */
 #define WSIZE      sizeof(void *) /* Word and header/footer size (bytes) */
